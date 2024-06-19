@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "ESP32"
+		},
+		{
+			"path": "flutter_hexapod_controller"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"string": "cpp"
+		}
+	}
+}
