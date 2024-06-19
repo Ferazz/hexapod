@@ -1,14 +1,11 @@
+import 'dart:convert';
 import 'dart:math';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:flutter_hexapod_controller/main.dart';
 import 'package:flutter_joystick/flutter_joystick.dart';
 
-import '../widgets/service_tile.dart';
-import '../widgets/characteristic_tile.dart';
-import '../widgets/descriptor_tile.dart';
 import '../utils/snackbar.dart';
 
 import '../utils/extra.dart';
@@ -43,17 +40,22 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
   late StreamSubscription<int> _mtuSubscription;
 
   // Control / joystick variables
+  Timer? _robotComsTimer;
   Point<double> _moveJoystickOffset = Point(0.0, 0.0);
   Point<double> _spinJoystickOffset = Point(0.0, 0.0);
 
+  @override
   void initState() {
     super.initState();
 
     _connectionStateSubscription =
         widget.device.connectionState.listen((state) async {
       _connectionState = state;
+
       if (state == BluetoothConnectionState.connected) {
+        // TODO: When disconnected and trying to reconnect this gives an error
         getServices();
+        requestMTU();
       }
       if (state == BluetoothConnectionState.connected && _rssi == null) {
         _rssi = await widget.device.readRssi();
@@ -84,6 +86,8 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
         setState(() {});
       }
     });
+
+    startPeriodicTask();
   }
 
   @override
@@ -92,6 +96,8 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
     _mtuSubscription.cancel();
     _isConnectingSubscription.cancel();
     _isDisconnectingSubscription.cancel();
+
+    _robotComsTimer!.cancel();
     super.dispose();
   }
 
@@ -145,7 +151,7 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
     }
   }
 
-  Future onRequestMtuPressed() async {
+  Future requestMTU() async {
     try {
       await widget.device.requestMtu(223, predelay: 0);
       Snackbar.show(ABC.c, "Request Mtu: Success", success: true);
@@ -185,11 +191,53 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
     ]);
   }
 
-  Widget buildRemoteId(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Text('${widget.device.remoteId}'),
-    );
+  void startPeriodicTask() {
+    // TODO: Make this changeable in settings in app?
+    _robotComsTimer =
+        Timer.periodic(const Duration(milliseconds: 150), (timer) {
+      if (_moveJoystickOffset.magnitude == 0.0 &&
+          _spinJoystickOffset.magnitude == 0.0) return;
+      transmitJoystickOffsets();
+    });
+  }
+
+  void transmitJoystickOffsets() async {
+    if (!isConnected) return;
+
+    BluetoothCharacteristic? joystickCharacteristic = _selectedCharacteristics[
+        characteristicUUIDs["JOYSTICK_OFFSET_CHARACTERISTIC_UUID"]];
+
+    BluetoothCharacteristic? speedCharacteristic = _selectedCharacteristics[
+        characteristicUUIDs["JOYSTICK_SPEED_CHARACTERISTIC_UUID"]];
+
+    if (joystickCharacteristic == null || speedCharacteristic == null) {
+      Snackbar.show(ABC.c, "Joystick Bluetooth connection failed",
+          success: false);
+      return;
+    }
+
+    // Currently send it all as one large string.
+    // TODO: Make this better
+
+    String offsetsStr =
+        "${(_moveJoystickOffset.x * 100).toInt()} ${(_moveJoystickOffset.y * 100).toInt()} ${(_spinJoystickOffset.x * 100).toInt()} ${(_spinJoystickOffset.y * 100).toInt()}";
+    double robotSpeed = _spinJoystickOffset.magnitude > 0.1
+        ? _spinJoystickOffset.magnitude
+        : _moveJoystickOffset.magnitude;
+
+    String robotSpeedStr = "$robotSpeed";
+    try {
+      await joystickCharacteristic.write(utf8.encode(offsetsStr));
+    } catch (e) {
+      Snackbar.show(ABC.c, prettyException("Joystick Write Error:", e),
+          success: false);
+    }
+    try {
+      speedCharacteristic.write(utf8.encode(robotSpeedStr));
+    } catch (e) {
+      Snackbar.show(ABC.c, prettyException("Speed Write Error:", e),
+          success: false);
+    }
   }
 
   Point<double> _getJoystickOffsetAsPoint(StickDragDetails joystickDetails) {
@@ -201,27 +249,23 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
 
   void _moveJoystickCallback(StickDragDetails details) {
     _moveJoystickOffset = _getJoystickOffsetAsPoint(details);
-    BluetoothCharacteristic? offset_characteristic = _selectedCharacteristics[
-        characteristicUUIDs["JOYSTICK_OFFSET_CHARACTERISTIC_UUID"]];
-
-    if (offset_characteristic == null) {}
-
     setState(() {});
   }
 
   void _spinJoystickCallback(StickDragDetails details) {
-    setState(() {
-      _spinJoystickOffset = _getJoystickOffsetAsPoint(details);
-    });
+    _spinJoystickOffset = _getJoystickOffsetAsPoint(details);
+    setState(() {});
   }
 
   Widget _buildLandscapeJoysticks(BuildContext context) {
     Widget moveJoystick = Joystick(
       listener: _moveJoystickCallback,
+      onStickDragEnd: transmitJoystickOffsets,
     );
 
     Widget spinJoystick = Joystick(
       listener: _spinJoystickCallback,
+      onStickDragEnd: transmitJoystickOffsets,
       mode: JoystickMode.horizontal,
     );
 
@@ -238,7 +282,10 @@ class _HexaControllerScreenState extends State<HexaControllerScreen> {
   }
 
   Widget _buildPortraitJoysticks(BuildContext context) {
-    Widget moveJoystick = Joystick(listener: _moveJoystickCallback);
+    Widget moveJoystick = Joystick(
+      listener: _moveJoystickCallback,
+      onStickDragEnd: transmitJoystickOffsets,
+    );
 
     return moveJoystick;
   }

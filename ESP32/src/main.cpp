@@ -30,6 +30,5 @@ void setup()
 void loop()
 {
   // put your main code here, to run repeatedly:
-  delay(2000);
   Serial.println(BLE::readCharacteristicValue(JOYSTICK_SERVICE_UUID, JOYSTICK_OFFSET_CHARACTERISTIC_UUID).c_str());
 }
