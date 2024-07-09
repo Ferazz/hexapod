@@ -5,6 +5,10 @@
 		},
 		{
 			"path": "flutter_hexapod_controller"
+		},
+		{
+			"name": "Atmega",
+			"path": "Atmega"
 		}
 	],
 	"settings": {
