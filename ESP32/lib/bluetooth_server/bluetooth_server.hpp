@@ -3,6 +3,9 @@
 #include <BLEServer.h>
 #include <Arduino.h>
 
+// See the following for generating UUIDs:
+// https://www.uuidgenerator.net/
+
 #define BATTERY_SERVICE_UUID "180F"
 #define BATTERY_LEVEL_CHARACTERISTIC_UUID "2A19"
 #define BATTERY_LEVEL_DESCRIPTOR_UUID 0x2901
